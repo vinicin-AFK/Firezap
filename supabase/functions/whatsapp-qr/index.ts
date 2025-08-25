@@ -13,7 +13,7 @@ serve(async (req) => {
   }
 
   try {
-    const { phone_number } = await req.json();
+    const { phone_number, chip_id } = await req.json();
     
     if (!phone_number) {
       return new Response(JSON.stringify({ 
@@ -25,8 +25,23 @@ serve(async (req) => {
       });
     }
     
-    const WHATSAPP_API_KEY = Deno.env.get('WHATSAPP_API_KEY');
-    const WHATSAPP_PHONE_NUMBER_ID = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
+    // Sistema de múltiplas APIs
+    let WHATSAPP_API_KEY = Deno.env.get('WHATSAPP_API_KEY');
+    let WHATSAPP_PHONE_NUMBER_ID = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
+    
+    // Se um chip_id específico foi fornecido, tenta usar API específica
+    if (chip_id) {
+      const chipSpecificKey = Deno.env.get(`WHATSAPP_API_KEY_${chip_id}`);
+      const chipSpecificPhoneId = Deno.env.get(`WHATSAPP_PHONE_NUMBER_ID_${chip_id}`);
+      
+      if (chipSpecificKey && chipSpecificPhoneId) {
+        WHATSAPP_API_KEY = chipSpecificKey;
+        WHATSAPP_PHONE_NUMBER_ID = chipSpecificPhoneId;
+        console.log(`Usando API específica para chip ${chip_id}`);
+      } else {
+        console.log(`API específica não encontrada para chip ${chip_id}, usando API principal`);
+      }
+    }
     
     if (!WHATSAPP_API_KEY || !WHATSAPP_PHONE_NUMBER_ID) {
       console.warn('WhatsApp API credentials not configured, using fallback QR');
@@ -41,13 +56,14 @@ serve(async (req) => {
         qr_code_url: fallbackQR,
         qr_code: fallbackQR,
         prefilled_message: `Conectando número ${phone_number} ao Fire Zap`,
-        note: 'Using fallback QR - configure WhatsApp API credentials for production'
+        note: 'Using fallback QR - configure WhatsApp API credentials for production',
+        api_used: 'fallback'
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    console.log(`Generating QR code for phone number: ${phone_number}`);
+    console.log(`Generating QR code for phone number: ${phone_number} using API: ${WHATSAPP_PHONE_NUMBER_ID}`);
 
     // Gerar QR code através da API do WhatsApp Business v19.0
     const qrResponse = await fetch(`https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_NUMBER_ID}/qr_codes`, {
@@ -76,7 +92,9 @@ serve(async (req) => {
         qr_code_url: fallbackQR,
         qr_code: fallbackQR,
         prefilled_message: `Conectando número ${phone_number} ao Fire Zap`,
-        note: 'Using fallback QR due to API error'
+        note: 'Using fallback QR due to API error',
+        api_used: 'fallback',
+        error: errorText
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -89,7 +107,8 @@ serve(async (req) => {
       success: true,
       qr_code_url: qrData.qr_image_url,
       qr_code: qrData.code,
-      prefilled_message: qrData.prefilled_message
+      prefilled_message: qrData.prefilled_message,
+      api_used: chip_id ? `chip_${chip_id}` : 'primary'
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -108,6 +127,7 @@ serve(async (req) => {
       qr_code: fallbackQR,
       prefilled_message: 'Conectando ao Fire Zap',
       note: 'Using fallback QR due to error',
+      api_used: 'fallback',
       error: error.message
     }), {
       status: 200, // Status 200 para não quebrar o fluxo

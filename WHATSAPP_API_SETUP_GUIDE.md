@@ -30,22 +30,53 @@ O erro "QR inválido" indica que as credenciais do **WhatsApp Business API** nã
 
 ---
 
+## 🔄 **Como Funciona a Plataforma de Múltiplos Números**
+
+### **Estrutura Atual:**
+- ✅ **Dashboard**: Lista todos os números conectados
+- ✅ **Chips**: Cada número é um "chip" no sistema
+- ✅ **Aquecimento**: Pode usar múltiplos chips simultaneamente
+- ✅ **Bot IA**: Responde para todos os números
+
+### **Fluxo de Múltiplos Números:**
+```
+1. Usuário conecta Número A → Vira "Chip A"
+2. Usuário conecta Número B → Vira "Chip B"
+3. Usuário conecta Número C → Vira "Chip C"
+4. Sistema pode fazer aquecimento entre:
+   - Chip A ↔ Bot IA
+   - Chip B ↔ Bot IA
+   - Chip A ↔ Chip B (n2n)
+   - Chip A ↔ Chip C (n2n)
+```
+
+### **Modos de Aquecimento:**
+- **Bot Mode**: Chip conversa com IA
+- **Chip-to-Chip**: Dois chips conversam entre si
+- **Multi-Chip**: Múltiplos chips em conversas simultâneas
+
+---
+
 ## 🔧 **Como Configurar o WhatsApp Business API**
 
-### **Passo 1: Criar Conta no Facebook Developer**
+### **Opção 1: Configuração Única (Recomendada para Início)**
+
+Configure uma API principal que será usada para todos os números:
+
+#### **Passo 1: Criar Conta no Facebook Developer**
 
 1. Acesse: https://developers.facebook.com/
 2. Clique em "Criar App"
 3. Selecione "Business" como tipo
 4. Preencha as informações básicas
 
-### **Passo 2: Configurar WhatsApp Business**
+#### **Passo 2: Configurar WhatsApp Business**
 
 1. No seu app, vá em **"Adicionar Produto"**
 2. Procure por **"WhatsApp"** e clique em **"Configurar"**
 3. Siga o assistente de configuração
 
-### **Passo 3: Obter Credenciais**
+#### **Passo 3: Obter Credenciais**
 
 1. **Access Token**:
    - Vá em **"WhatsApp > Getting Started"**
@@ -61,7 +92,7 @@ O erro "QR inválido" indica que as credenciais do **WhatsApp Business API** nã
    - Crie um token personalizado (ex: `fire_zap_webhook_token`)
    - Este é o `WHATSAPP_VERIFY_TOKEN`
 
-### **Passo 4: Configurar no Supabase**
+#### **Passo 4: Configurar no Supabase**
 
 1. Acesse: https://supabase.com/dashboard/project/fuohmclakezkvgaiarao/settings/secrets
 2. Adicione as seguintes variáveis:
@@ -71,6 +102,29 @@ WHATSAPP_API_KEY=seu_access_token_aqui
 WHATSAPP_PHONE_NUMBER_ID=seu_phone_number_id_aqui
 WHATSAPP_VERIFY_TOKEN=fire_zap_webhook_token
 ```
+
+### **Opção 2: Configuração Multi-API (Avançado)**
+
+Para usar APIs separadas para cada número:
+
+#### **Estrutura de Credenciais Múltiplas:**
+```bash
+# API Principal (para números principais)
+WHATSAPP_API_KEY=token_principal
+WHATSAPP_PHONE_NUMBER_ID=id_principal
+
+# APIs Secundárias (para números adicionais)
+WHATSAPP_API_KEY_2=token_secundario
+WHATSAPP_PHONE_NUMBER_ID_2=id_secundario
+
+WHATSAPP_API_KEY_3=token_terceiro
+WHATSAPP_PHONE_NUMBER_ID_3=id_terceiro
+```
+
+#### **Como Funciona:**
+- Sistema usa API principal por padrão
+- Cada chip pode ter sua própria API configurada
+- Fallback para API principal se específica não estiver disponível
 
 ---
 
@@ -196,3 +250,23 @@ Se ainda tiver problemas:
 - [ ] Testar QR real
 
 **Status atual**: ⚠️ **Requer configuração da API do WhatsApp Business**
+
+---
+
+## 🎯 **Resumo: Múltiplos Números**
+
+### **Como Funciona:**
+- ✅ Sistema suporta múltiplos números ("chips")
+- ✅ Cada número pode ser conectado independentemente
+- ✅ Aquecimento funciona entre múltiplos números
+- ✅ Bot IA responde para todos os números
+
+### **Configuração Necessária:**
+- ⚠️ **Uma API principal** para começar
+- 🔄 **APIs adicionais** opcionais para cada número
+- ✅ **Sistema flexível** que funciona com ambas as opções
+
+### **Recomendação:**
+1. **Comece com uma API** (mais simples)
+2. **Teste com múltiplos números** usando a mesma API
+3. **Expanda para múltiplas APIs** conforme necessário

@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.whatsapp-websocket]
 verify_jwt = false
+
+[functions.manage-whatsapp-apis]
+verify_jwt = false

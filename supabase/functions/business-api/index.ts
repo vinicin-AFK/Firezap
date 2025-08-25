@@ -11,14 +11,7 @@ serve(async (req) => {
   }
 
   try {
-    const WHATSAPP_API_KEY = Deno.env.get('WHATSAPP_API_KEY');
-    const WHATSAPP_PHONE_NUMBER_ID = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
-    
-    if (!WHATSAPP_API_KEY || !WHATSAPP_PHONE_NUMBER_ID) {
-      throw new Error('WhatsApp Business API credentials not configured');
-    }
-
-    const { number, message, type = 'text' } = await req.json();
+    const { number, message, type = 'text', chip_id } = await req.json();
 
     if (!number || !message) {
       return new Response(JSON.stringify({ 
@@ -29,7 +22,29 @@ serve(async (req) => {
       });
     }
 
-    console.log(`📤 Enviando mensagem business para ${number}: ${message}`);
+    // Sistema de múltiplas APIs
+    let WHATSAPP_API_KEY = Deno.env.get('WHATSAPP_API_KEY');
+    let WHATSAPP_PHONE_NUMBER_ID = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
+    
+    // Se um chip_id específico foi fornecido, tenta usar API específica
+    if (chip_id) {
+      const chipSpecificKey = Deno.env.get(`WHATSAPP_API_KEY_${chip_id}`);
+      const chipSpecificPhoneId = Deno.env.get(`WHATSAPP_PHONE_NUMBER_ID_${chip_id}`);
+      
+      if (chipSpecificKey && chipSpecificPhoneId) {
+        WHATSAPP_API_KEY = chipSpecificKey;
+        WHATSAPP_PHONE_NUMBER_ID = chipSpecificPhoneId;
+        console.log(`Usando API específica para chip ${chip_id}`);
+      } else {
+        console.log(`API específica não encontrada para chip ${chip_id}, usando API principal`);
+      }
+    }
+    
+    if (!WHATSAPP_API_KEY || !WHATSAPP_PHONE_NUMBER_ID) {
+      throw new Error('WhatsApp Business API credentials not configured');
+    }
+
+    console.log(`📤 Enviando mensagem business para ${number} via API ${WHATSAPP_PHONE_NUMBER_ID}: ${message}`);
 
     const response = await fetch(
       `https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`,
@@ -64,6 +79,7 @@ serve(async (req) => {
       to: number,
       message,
       type: 'business',
+      api_used: chip_id ? `chip_${chip_id}` : 'primary',
       timestamp: new Date().toISOString()
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
