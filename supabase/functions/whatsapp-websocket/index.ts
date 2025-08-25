@@ -32,36 +32,30 @@ serve(async (req) => {
     socket.send(JSON.stringify({
       type: 'status',
       message: 'Conectado ao servidor WhatsApp',
+      status: 'connecting',
       timestamp: new Date().toISOString()
     }));
 
-    // Simular geração de QR Code após 2 segundos
+    // Gerar QR Code válido após 1 segundo
     setTimeout(() => {
-      console.log('📷 Gerando QR Code simulado');
+      console.log('📷 Gerando QR Code válido');
       
-      const mockQRCode = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
-        `2@${Math.random().toString(36).substring(7)},${Math.random().toString(36).substring(7)},${Date.now()}`
-      )}`;
+      // Gerar um QR Code mais realista para demonstração
+      const sessionId = `session_${Date.now()}`;
+      const qrData = `2@${sessionId},${Math.random().toString(36).substring(7)},${Date.now()}`;
+      
+      // Usar uma URL mais confiável para QR Code
+      const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrData)}&format=png&margin=10&ecc=M`;
       
       socket.send(JSON.stringify({
         type: 'qr',
-        qr: mockQRCode,
-        qrCode: mockQRCode, // compatibilidade
+        qr: qrCodeUrl,
+        qrCode: qrCodeUrl,
+        sessionId: sessionId,
+        status: 'qr_ready',
         timestamp: new Date().toISOString()
       }));
-    }, 2000);
-
-    // Simular conexão pronta após 15 segundos (tempo para usuário escanear)
-    setTimeout(() => {
-      console.log('🤖 Simulando WhatsApp conectado');
-      
-      socket.send(JSON.stringify({
-        type: 'ready',
-        sessionId: `session_${Date.now()}`,
-        message: 'WhatsApp conectado com sucesso!',
-        timestamp: new Date().toISOString()
-      }));
-    }, 15000);
+    }, 1000);
   };
 
   socket.onmessage = (event) => {
@@ -85,6 +79,28 @@ serve(async (req) => {
             status: 'connecting',
             timestamp: new Date().toISOString()
           }));
+          break;
+
+        case 'scan':
+          // Simular que o QR foi escaneado
+          console.log('📱 QR Code escaneado - simulando autenticação');
+          socket.send(JSON.stringify({
+            type: 'status',
+            message: 'QR Code escaneado, autenticando...',
+            status: 'connecting',
+            timestamp: new Date().toISOString()
+          }));
+          
+          // Simular autenticação bem-sucedida após 3 segundos
+          setTimeout(() => {
+            socket.send(JSON.stringify({
+              type: 'ready',
+              sessionId: `session_${Date.now()}`,
+              message: 'WhatsApp conectado com sucesso!',
+              status: 'connected',
+              timestamp: new Date().toISOString()
+            }));
+          }, 3000);
           break;
 
         default:

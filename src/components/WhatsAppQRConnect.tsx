@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useWhatsAppRealtime } from "@/hooks/useWhatsAppRealtime";
-import { QrCode, Smartphone, CheckCircle, Loader2, RefreshCw } from "lucide-react";
+import { QrCode, Smartphone, CheckCircle, Loader2, RefreshCw, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface WhatsAppQRConnectProps {
@@ -27,6 +27,7 @@ export function WhatsAppQRConnect({
   } = useWhatsAppRealtime();
 
   const [isConnecting, setIsConnecting] = useState(false);
+  const [qrError, setQrError] = useState(false);
 
   useEffect(() => {
     if (isConnected && onConnectionSuccess) {
@@ -50,10 +51,12 @@ export function WhatsAppQRConnect({
 
   const handleConnect = async () => {
     setIsConnecting(true);
+    setQrError(false);
     try {
       await connectToWhatsApp(sessionId);
     } catch (error) {
       console.error("Erro ao conectar:", error);
+      setQrError(true);
     } finally {
       setIsConnecting(false);
     }
@@ -62,9 +65,11 @@ export function WhatsAppQRConnect({
   const handleDisconnect = () => {
     disconnect();
     setIsConnecting(false);
+    setQrError(false);
   };
 
   const handleReconnect = () => {
+    setQrError(false);
     reconnect();
   };
 
@@ -86,6 +91,15 @@ export function WhatsAppQRConnect({
       case 'error': return 'Erro';
       default: return 'Desconectado';
     }
+  };
+
+  const handleQrError = () => {
+    setQrError(true);
+    toast({
+      title: "⚠️ Erro no QR Code",
+      description: "Não foi possível carregar o QR Code. Tente novamente.",
+      variant: "destructive",
+    });
   };
 
   return (
@@ -136,7 +150,7 @@ export function WhatsAppQRConnect({
                   </Button>
                 </div>
               </div>
-            ) : qrCode && connectionStatus === 'qr_ready' ? (
+            ) : qrCode && connectionStatus === 'qr_ready' && !qrError ? (
               <div className="space-y-4">
                 <div className="flex justify-center">
                   <QrCode className="h-8 w-8 text-blue-500" />
@@ -151,24 +165,8 @@ export function WhatsAppQRConnect({
                       alt="QR Code para conectar WhatsApp"
                       className="w-64 h-64 mx-auto"
                       style={{ imageRendering: 'pixelated' }}
-                      onError={(e) => {
-                        // Fallback se houver erro ao carregar
-                        console.log('Erro ao carregar QR, usando fallback');
-                        e.currentTarget.src = `data:image/svg+xml;base64,${btoa(`
-                          <svg width="300" height="300" xmlns="http://www.w3.org/2000/svg">
-                            <rect width="300" height="300" fill="white"/>
-                            <text x="150" y="120" text-anchor="middle" font-size="14" fill="black">
-                              QR Code Gerado
-                            </text>
-                            <text x="150" y="150" text-anchor="middle" font-size="12" fill="gray">
-                              Aguarde...
-                            </text>
-                            <text x="150" y="180" text-anchor="middle" font-size="10" fill="gray">
-                              Recarregue se necessário
-                            </text>
-                          </svg>
-                        `)}`;
-                      }}
+                      onError={handleQrError}
+                      onLoad={() => setQrError(false)}
                     />
                   </div>
                 </div>
@@ -178,10 +176,26 @@ export function WhatsAppQRConnect({
                   <p>3. Toque em "Conectar um dispositivo"</p>
                   <p>4. Escaneie este QR Code</p>
                 </div>
-                <Button onClick={handleReconnect} variant="outline" size="sm">
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Atualizar QR Code
-                </Button>
+                <div className="flex gap-2 justify-center">
+                  <Button onClick={handleReconnect} variant="outline" size="sm">
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Atualizar QR Code
+                  </Button>
+                  <Button 
+                    onClick={() => {
+                      // Simular que o QR foi escaneado
+                      const ws = new WebSocket("wss://fuohmclakezkvgaiarao.functions.supabase.co/functions/v1/whatsapp-websocket");
+                      ws.onopen = () => {
+                        ws.send(JSON.stringify({ type: 'scan' }));
+                        ws.close();
+                      };
+                    }} 
+                    variant="secondary" 
+                    size="sm"
+                  >
+                    Simular Escaneamento
+                  </Button>
+                </div>
               </div>
             ) : connectionStatus === 'connecting' || isConnecting ? (
               <div className="space-y-4">
@@ -195,9 +209,10 @@ export function WhatsAppQRConnect({
                   Aguarde enquanto conectamos com o WhatsApp
                 </p>
               </div>
-            ) : connectionStatus === 'error' ? (
+            ) : connectionStatus === 'error' || qrError ? (
               <div className="space-y-4">
                 <div className="text-red-500 text-center">
+                  <AlertCircle className="h-16 w-16 mx-auto mb-2" />
                   <h3 className="text-lg font-semibold">❌ Erro na conexão</h3>
                   <p className="text-sm text-muted-foreground mt-2">
                     {error || "Erro desconhecido ao conectar"}

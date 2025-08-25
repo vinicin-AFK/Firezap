@@ -20,12 +20,22 @@ export const useWhatsAppRealtime = () => {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttempts = useRef(0);
-  const maxReconnectAttempts = 5;
+  const maxReconnectAttempts = 3;
 
   const connectSocketIO = useCallback((sessionId?: string) => {
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) return;
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      console.log('🔗 WebSocket já está conectado');
+      return;
+    }
 
-    setState(prev => ({ ...prev, connectionStatus: 'connecting' }));
+    // Limpar estado anterior
+    setState(prev => ({ 
+      ...prev, 
+      connectionStatus: 'connecting',
+      error: null,
+      qrCode: null 
+    }));
+
     console.log('🔄 Conectando ao WebSocket do WhatsApp...');
 
     try {
@@ -44,14 +54,19 @@ export const useWhatsAppRealtime = () => {
         reconnectAttempts.current = 0;
       };
 
-      socket.onclose = () => {
-        console.warn('⚠️ Desconectado do servidor WebSocket');
+      socket.onclose = (event) => {
+        console.warn('⚠️ Desconectado do servidor WebSocket:', event.code, event.reason);
         setState(prev => ({
           ...prev,
           connectionStatus: 'disconnected',
           isConnected: false,
+          qrCode: null,
         }));
-        attemptReconnect();
+        
+        // Só tentar reconectar se não foi um fechamento intencional
+        if (event.code !== 1000) {
+          attemptReconnect();
+        }
       };
 
       socket.onerror = (error: any) => {
@@ -74,8 +89,9 @@ export const useWhatsAppRealtime = () => {
               console.log('📷 QR Code recebido');
               setState(prev => ({
                 ...prev,
-                qrCode: data.qrCode,
+                qrCode: data.qrCode || data.qr,
                 connectionStatus: 'qr_ready',
+                error: null,
               }));
               break;
 
@@ -87,6 +103,7 @@ export const useWhatsAppRealtime = () => {
                 isConnected: true,
                 sessionId: data.sessionId,
                 qrCode: null,
+                error: null,
               }));
               break;
 
@@ -95,6 +112,7 @@ export const useWhatsAppRealtime = () => {
               setState(prev => ({
                 ...prev,
                 connectionStatus: data.status || 'connecting',
+                error: null,
               }));
               break;
 
@@ -112,6 +130,11 @@ export const useWhatsAppRealtime = () => {
           }
         } catch (error) {
           console.error('❌ Erro ao processar mensagem:', error);
+          setState(prev => ({
+            ...prev,
+            connectionStatus: 'error',
+            error: 'Erro ao processar resposta do servidor',
+          }));
         }
       };
 
@@ -128,11 +151,16 @@ export const useWhatsAppRealtime = () => {
   const attemptReconnect = useCallback(() => {
     if (reconnectAttempts.current >= maxReconnectAttempts) {
       console.error('🚫 Número máximo de tentativas de reconexão atingido.');
+      setState(prev => ({
+        ...prev,
+        connectionStatus: 'error',
+        error: 'Falha na conexão após múltiplas tentativas',
+      }));
       return;
     }
 
     reconnectAttempts.current += 1;
-    const delay = 3000;
+    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current - 1), 10000); // Exponential backoff
 
     console.log(`🔁 Tentando reconectar em ${delay / 1000} segundos... (${reconnectAttempts.current}/${maxReconnectAttempts})`);
 
@@ -142,6 +170,7 @@ export const useWhatsAppRealtime = () => {
   }, [connectSocketIO]);
 
   useEffect(() => {
+    // Conectar automaticamente quando o hook é montado
     connectSocketIO();
 
     return () => {
@@ -150,18 +179,22 @@ export const useWhatsAppRealtime = () => {
       }
 
       if (socketRef.current) {
-        socketRef.current.close();
+        socketRef.current.close(1000, 'Component unmounted');
+        socketRef.current = null;
       }
     };
   }, [connectSocketIO]);
 
   const disconnect = useCallback(() => {
+    console.log('🔌 Desconectando WebSocket...');
+    
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
     }
 
     if (socketRef.current) {
-      socketRef.current.close();
+      socketRef.current.close(1000, 'User disconnected');
       socketRef.current = null;
     }
 
@@ -174,10 +207,23 @@ export const useWhatsAppRealtime = () => {
     });
   }, []);
 
+  const reconnect = useCallback(() => {
+    console.log('🔄 Reconectando...');
+    disconnect();
+    
+    // Reset reconnect attempts
+    reconnectAttempts.current = 0;
+    
+    // Conectar novamente após um pequeno delay
+    setTimeout(() => {
+      connectSocketIO();
+    }, 500);
+  }, [disconnect, connectSocketIO]);
+
   return {
     ...state,
     connectToWhatsApp: connectSocketIO,
     disconnect,
-    reconnect: connectSocketIO,
+    reconnect,
   };
 };
