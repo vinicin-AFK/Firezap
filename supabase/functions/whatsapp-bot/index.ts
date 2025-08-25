@@ -67,7 +67,7 @@ serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4.1-2025-04-14',
+        model: 'gpt-4o-mini', // Modelo atualizado e mais estável
         messages: [
           { 
             role: 'system', 
@@ -110,7 +110,7 @@ serve(async (req) => {
     console.log('✅ Bot response generated:', botResponse);
 
     // Se sendMessage for true, enviar a mensagem via WhatsApp Business API oficial
-    if (sendMessage && phoneNumber && phoneNumberId) {
+    if (sendMessage && phoneNumber && phoneNumberId && whatsappAccessToken) {
       try {
         // Endpoint oficial da API do WhatsApp Business v19.0
         const whatsappApiUrl = `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`;
