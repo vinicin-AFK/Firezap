@@ -3,8 +3,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useWhatsAppRealtime } from "@/hooks/useWhatsAppRealtime";
-import { QrCode, Smartphone, CheckCircle, Loader2, RefreshCw, AlertCircle } from "lucide-react";
+import { QrCode, Smartphone, CheckCircle, Loader2, RefreshCw, AlertCircle, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 interface WhatsAppQRConnectProps {
   sessionId?: string;
@@ -28,6 +29,27 @@ export function WhatsAppQRConnect({
 
   const [isConnecting, setIsConnecting] = useState(false);
   const [qrError, setQrError] = useState(false);
+  const [credentialsStatus, setCredentialsStatus] = useState<'checking' | 'configured' | 'not-configured' | 'error'>('checking');
+
+  // Verificar status das credenciais
+  useEffect(() => {
+    checkCredentialsStatus();
+  }, []);
+
+  const checkCredentialsStatus = async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke('verify-whatsapp-credentials');
+      
+      if (error) {
+        setCredentialsStatus('error');
+        return;
+      }
+
+      setCredentialsStatus(data.success ? 'configured' : 'not-configured');
+    } catch (error) {
+      setCredentialsStatus('error');
+    }
+  };
 
   useEffect(() => {
     if (isConnected && onConnectionSuccess) {
@@ -102,6 +124,25 @@ export function WhatsAppQRConnect({
     });
   };
 
+  const getCredentialsStatusText = () => {
+    switch (credentialsStatus) {
+      case 'checking': return 'Verificando...';
+      case 'configured': return 'API Configurada';
+      case 'not-configured': return 'API Não Configurada';
+      case 'error': return 'Erro na Verificação';
+      default: return 'Desconhecido';
+    }
+  };
+
+  const getCredentialsStatusColor = () => {
+    switch (credentialsStatus) {
+      case 'configured': return 'bg-green-500';
+      case 'not-configured': return 'bg-yellow-500';
+      case 'error': return 'bg-red-500';
+      default: return 'bg-gray-500';
+    }
+  };
+
   return (
     <div className="w-full max-w-2xl mx-auto">
       <Card>
@@ -116,6 +157,25 @@ export function WhatsAppQRConnect({
         </CardHeader>
         
         <CardContent className="space-y-6">
+          {/* Status das Credenciais */}
+          <div className="flex items-center justify-center gap-3">
+            <div className={`w-3 h-3 rounded-full ${getCredentialsStatusColor()}`} />
+            <Badge variant="outline" className="text-sm">
+              {getCredentialsStatusText()}
+            </Badge>
+            {credentialsStatus === 'not-configured' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => window.open('/verify-credentials', '_blank')}
+                className="text-xs"
+              >
+                <ExternalLink className="h-3 w-3 mr-1" />
+                Configurar
+              </Button>
+            )}
+          </div>
+
           {/* Status da Conexão */}
           <div className="flex items-center justify-center gap-3">
             <div className={`w-3 h-3 rounded-full ${getStatusColor()}`} />
@@ -126,6 +186,32 @@ export function WhatsAppQRConnect({
               {getStatusText()}
             </Badge>
           </div>
+
+          {/* Aviso sobre API não configurada */}
+          {credentialsStatus === 'not-configured' && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                <div className="text-sm">
+                  <h4 className="font-medium text-yellow-800 mb-1">
+                    API do WhatsApp Business não configurada
+                  </h4>
+                  <p className="text-yellow-700 mb-2">
+                    O QR Code será simulado para demonstração. Para conexão real, configure a API do WhatsApp Business.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.open('/verify-credentials', '_blank')}
+                    className="text-xs"
+                  >
+                    <ExternalLink className="h-3 w-3 mr-1" />
+                    Verificar Credenciais
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Conteúdo Principal */}
           <div className="text-center space-y-4">
@@ -268,6 +354,11 @@ export function WhatsAppQRConnect({
                 Mantenha seu celular conectado à internet durante todo o processo. 
                 A conexão é estabelecida através do WhatsApp Web.
               </p>
+              {credentialsStatus === 'not-configured' && (
+                <p className="mt-2 text-yellow-600">
+                  <strong>Nota:</strong> Para conexão real, configure a API do WhatsApp Business.
+                </p>
+              )}
             </div>
           )}
         </CardContent>
