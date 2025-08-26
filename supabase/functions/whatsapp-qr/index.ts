@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 
 const corsHeaders = {
@@ -25,33 +26,63 @@ serve(async (req) => {
       });
     }
     
-    // Sistema de múltiplas APIs
-    let WHATSAPP_API_KEY = Deno.env.get('WHATSAPP_API_KEY');
-    let WHATSAPP_PHONE_NUMBER_ID = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
+    // Criar cliente Supabase
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Obter user_id do header de autorização
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      return new Response(JSON.stringify({ 
+        error: 'Authorization header required' 
+      }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+    
+    if (userError || !user) {
+      return new Response(JSON.stringify({ 
+        error: 'Invalid token' 
+      }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     
     console.log('=== GERANDO QR CODE ===');
     console.log('Phone number:', phone_number);
     console.log('Chip ID:', chip_id);
-    console.log('API Key existe:', !!WHATSAPP_API_KEY);
-    console.log('Phone Number ID existe:', !!WHATSAPP_PHONE_NUMBER_ID);
+    console.log('User ID:', user.id);
     
-    // Se um chip_id específico foi fornecido, tenta usar API específica
-    if (chip_id) {
-      const chipSpecificKey = Deno.env.get(`WHATSAPP_API_KEY_${chip_id}`);
-      const chipSpecificPhoneId = Deno.env.get(`WHATSAPP_PHONE_NUMBER_ID_${chip_id}`);
-      
-      if (chipSpecificKey && chipSpecificPhoneId) {
-        WHATSAPP_API_KEY = chipSpecificKey;
-        WHATSAPP_PHONE_NUMBER_ID = chipSpecificPhoneId;
-        console.log(`Usando API específica para chip ${chip_id}`);
-      } else {
-        console.log(`API específica não encontrada para chip ${chip_id}, usando API principal`);
-      }
+    // Buscar APIs do usuário
+    const { data: apis, error: apisError } = await supabase
+      .from('whatsapp_apis')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+
+    if (apisError) {
+      console.error('Erro ao buscar APIs:', apisError);
+      return new Response(JSON.stringify({ 
+        error: 'Erro ao buscar APIs',
+        success: false 
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
+
+    console.log('APIs encontradas:', apis?.length || 0);
     
-    // Se não temos credenciais, usar fallback
-    if (!WHATSAPP_API_KEY || !WHATSAPP_PHONE_NUMBER_ID) {
-      console.warn('❌ WhatsApp API credentials not configured, using fallback QR');
+    // Se não há APIs configuradas, usar fallback
+    if (!apis || apis.length === 0) {
+      console.warn('❌ Nenhuma API configurada, usando fallback QR');
       
       // Fallback: gerar QR code simulado
       const fallbackQR = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
@@ -63,18 +94,32 @@ serve(async (req) => {
         qr_code_url: fallbackQR,
         qr_code: fallbackQR,
         prefilled_message: `Conectando número ${phone_number} ao Fire Zap`,
-        note: 'Using fallback QR - configure WhatsApp API credentials for production',
+        note: 'Using fallback QR - no WhatsApp APIs configured',
         api_used: 'fallback',
         debug_info: {
-          api_key_exists: !!WHATSAPP_API_KEY,
-          phone_number_id_exists: !!WHATSAPP_PHONE_NUMBER_ID
+          apis_found: 0,
+          user_id: user.id
         }
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    console.log(`✅ Gerando QR code real para número: ${phone_number} usando API: ${WHATSAPP_PHONE_NUMBER_ID}`);
+    // Usar a primeira API ativa (ou uma específica se chip_id for fornecido)
+    let selectedApi = apis[0];
+    
+    if (chip_id) {
+      // Tentar encontrar uma API específica para o chip
+      const specificApi = apis.find(api => api.id === chip_id);
+      if (specificApi) {
+        selectedApi = specificApi;
+        console.log(`Usando API específica para chip ${chip_id}: ${selectedApi.name}`);
+      } else {
+        console.log(`API específica não encontrada para chip ${chip_id}, usando primeira API disponível`);
+      }
+    }
+
+    console.log(`✅ Gerando QR code real para número: ${phone_number} usando API: ${selectedApi.name} (${selectedApi.phone_number_id})`);
 
     // IMPORTANTE: A API do WhatsApp Business NÃO tem endpoint de QR codes
     // Vamos usar uma abordagem diferente - gerar um QR que direciona para o WhatsApp Web
@@ -82,10 +127,10 @@ serve(async (req) => {
     
     try {
       // Tentativa 1: Verificar se o número está registrado na API
-      const phoneInfoResponse = await fetch(`https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_NUMBER_ID}`, {
+      const phoneInfoResponse = await fetch(`https://graph.facebook.com/v19.0/${selectedApi.phone_number_id}`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${WHATSAPP_API_KEY}`,
+          'Authorization': `Bearer ${selectedApi.api_key}`,
         },
       });
 
@@ -104,7 +149,12 @@ serve(async (req) => {
           prefilled_message: `Conectando número ${phone_number} ao Fire Zap`,
           note: 'Using WhatsApp Web QR - API credentials are working',
           api_used: 'whatsapp_web',
-          phone_verified: true
+          phone_verified: true,
+          api_info: {
+            id: selectedApi.id,
+            name: selectedApi.name,
+            phone_number_id: selectedApi.phone_number_id
+          }
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -130,8 +180,9 @@ serve(async (req) => {
         api_used: 'fallback',
         error: apiError.message,
         debug_info: {
-          api_key_exists: !!WHATSAPP_API_KEY,
-          phone_number_id_exists: !!WHATSAPP_PHONE_NUMBER_ID
+          apis_found: apis.length,
+          user_id: user.id,
+          selected_api: selectedApi.name
         }
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

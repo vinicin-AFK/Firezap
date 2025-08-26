@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -11,20 +12,59 @@ serve(async (req) => {
   }
 
   try {
-    const { action, chip_id, api_key, phone_number_id } = await req.json();
+    const { action, api_id, name, api_key, phone_number_id, verify_token } = await req.json();
+
+    if (!action) {
+      return new Response(JSON.stringify({ 
+        error: 'action é obrigatório' 
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Criar cliente Supabase
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Obter user_id do header de autorização
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      return new Response(JSON.stringify({ 
+        error: 'Authorization header required' 
+      }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+    
+    if (userError || !user) {
+      return new Response(JSON.stringify({ 
+        error: 'Invalid token' 
+      }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     switch (action) {
       case 'list':
-        return await listAPIs();
+        return await listAPIs(supabase, user.id);
       case 'add':
-        return await addAPI(chip_id, api_key, phone_number_id);
-      case 'remove':
-        return await removeAPI(chip_id);
+        return await addAPI(supabase, user.id, { name, api_key, phone_number_id, verify_token });
+      case 'update':
+        return await updateAPI(supabase, user.id, api_id, { name, api_key, phone_number_id, verify_token });
+      case 'delete':
+        return await deleteAPI(supabase, user.id, api_id);
       case 'test':
-        return await testAPI(chip_id, api_key, phone_number_id);
+        return await testAPI(supabase, user.id, api_id);
       default:
         return new Response(JSON.stringify({ 
-          error: 'Ação não reconhecida. Use: list, add, remove, test' 
+          error: 'Ação inválida' 
         }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -43,175 +83,193 @@ serve(async (req) => {
   }
 });
 
-async function listAPIs() {
-  const apis = [];
-  
-  // API Principal
-  const primaryKey = Deno.env.get('WHATSAPP_API_KEY');
-  const primaryPhoneId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
-  
-  if (primaryKey && primaryPhoneId) {
-    apis.push({
-      id: 'primary',
-      name: 'API Principal',
-      api_key: primaryKey.substring(0, 10) + '...',
-      phone_number_id: primaryPhoneId,
-      status: 'configured'
+async function listAPIs(supabase: any, userId: string) {
+  const { data: apis, error } = await supabase
+    .from('whatsapp_apis')
+    .select('id, name, phone_number_id, is_active, created_at, updated_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw new Error(`Erro ao listar APIs: ${error.message}`);
+  }
+
+  return new Response(JSON.stringify({
+    success: true,
+    apis: apis || [],
+    total: apis?.length || 0
+  }), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+async function addAPI(supabase: any, userId: string, apiData: any) {
+  const { name, api_key, phone_number_id, verify_token } = apiData;
+
+  if (!name || !api_key || !phone_number_id) {
+    return new Response(JSON.stringify({ 
+      error: 'name, api_key e phone_number_id são obrigatórios' 
+    }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  // APIs Secundárias (procurar por padrão WHATSAPP_API_KEY_*)
-  for (let i = 1; i <= 10; i++) {
-    const key = Deno.env.get(`WHATSAPP_API_KEY_${i}`);
-    const phoneId = Deno.env.get(`WHATSAPP_PHONE_NUMBER_ID_${i}`);
-    
-    if (key && phoneId) {
-      apis.push({
-        id: `chip_${i}`,
-        name: `API Chip ${i}`,
-        api_key: key.substring(0, 10) + '...',
-        phone_number_id: phoneId,
-        status: 'configured'
-      });
+  const { data: api, error } = await supabase
+    .from('whatsapp_apis')
+    .insert({
+      user_id: userId,
+      name,
+      api_key,
+      phone_number_id,
+      verify_token: verify_token || 'fire_zap_webhook_token',
+      is_active: true
+    })
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Erro ao adicionar API: ${error.message}`);
+  }
+
+  return new Response(JSON.stringify({
+    success: true,
+    message: 'API adicionada com sucesso',
+    api: {
+      id: api.id,
+      name: api.name,
+      phone_number_id: api.phone_number_id,
+      is_active: api.is_active
     }
+  }), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+async function updateAPI(supabase: any, userId: string, apiId: string, apiData: any) {
+  if (!apiId) {
+    return new Response(JSON.stringify({ 
+      error: 'api_id é obrigatório' 
+    }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const updateData: any = {};
+  if (apiData.name) updateData.name = apiData.name;
+  if (apiData.api_key) updateData.api_key = apiData.api_key;
+  if (apiData.phone_number_id) updateData.phone_number_id = apiData.phone_number_id;
+  if (apiData.verify_token) updateData.verify_token = apiData.verify_token;
+
+  const { data: api, error } = await supabase
+    .from('whatsapp_apis')
+    .update(updateData)
+    .eq('id', apiId)
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Erro ao atualizar API: ${error.message}`);
   }
 
   return new Response(JSON.stringify({
     success: true,
-    apis,
-    total: apis.length
+    message: 'API atualizada com sucesso',
+    api: {
+      id: api.id,
+      name: api.name,
+      phone_number_id: api.phone_number_id,
+      is_active: api.is_active
+    }
   }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 }
 
-async function addAPI(chip_id: string, api_key: string, phone_number_id: string) {
-  if (!chip_id || !api_key || !phone_number_id) {
+async function deleteAPI(supabase: any, userId: string, apiId: string) {
+  if (!apiId) {
     return new Response(JSON.stringify({ 
-      error: 'chip_id, api_key e phone_number_id são obrigatórios' 
+      error: 'api_id é obrigatório' 
     }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  // Testar a API antes de "adicionar"
-  const testResult = await testAPIInternal(api_key, phone_number_id);
-  
-  if (!testResult.success) {
-    return new Response(JSON.stringify({ 
-      error: 'API inválida: ' + testResult.error 
-    }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
+  const { error } = await supabase
+    .from('whatsapp_apis')
+    .delete()
+    .eq('id', apiId)
+    .eq('user_id', userId);
 
-  // Nota: Em produção, você precisaria salvar essas credenciais no banco de dados
-  // Por enquanto, retornamos sucesso mas as credenciais precisam ser adicionadas manualmente no Supabase
-  
-  return new Response(JSON.stringify({
-    success: true,
-    message: `API para chip ${chip_id} testada com sucesso. Adicione as credenciais no Supabase:`,
-    instructions: [
-      `WHATSAPP_API_KEY_${chip_id}=${api_key}`,
-      `WHATSAPP_PHONE_NUMBER_ID_${chip_id}=${phone_number_id}`
-    ],
-    note: 'As credenciais precisam ser adicionadas manualmente no painel do Supabase'
-  }), {
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
-}
-
-async function removeAPI(chip_id: string) {
-  if (!chip_id) {
-    return new Response(JSON.stringify({ 
-      error: 'chip_id é obrigatório' 
-    }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+  if (error) {
+    throw new Error(`Erro ao deletar API: ${error.message}`);
   }
 
   return new Response(JSON.stringify({
     success: true,
-    message: `Para remover a API do chip ${chip_id}, remova as seguintes variáveis do Supabase:`,
-    instructions: [
-      `WHATSAPP_API_KEY_${chip_id}`,
-      `WHATSAPP_PHONE_NUMBER_ID_${chip_id}`
-    ],
-    note: 'As credenciais precisam ser removidas manualmente no painel do Supabase'
+    message: 'API deletada com sucesso'
   }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 }
 
-async function testAPI(chip_id: string, api_key?: string, phone_number_id?: string) {
-  if (!chip_id) {
+async function testAPI(supabase: any, userId: string, apiId: string) {
+  if (!apiId) {
     return new Response(JSON.stringify({ 
-      error: 'chip_id é obrigatório' 
+      error: 'api_id é obrigatório' 
     }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  let testApiKey = api_key;
-  let testPhoneId = phone_number_id;
+  // Buscar a API
+  const { data: api, error: fetchError } = await supabase
+    .from('whatsapp_apis')
+    .select('api_key, phone_number_id')
+    .eq('id', apiId)
+    .eq('user_id', userId)
+    .single();
 
-  // Se não foram fornecidas, tentar pegar das variáveis de ambiente
-  if (!testApiKey || !testPhoneId) {
-    testApiKey = Deno.env.get(`WHATSAPP_API_KEY_${chip_id}`) || Deno.env.get('WHATSAPP_API_KEY');
-    testPhoneId = Deno.env.get(`WHATSAPP_PHONE_NUMBER_ID_${chip_id}`) || Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
-  }
-
-  if (!testApiKey || !testPhoneId) {
+  if (fetchError || !api) {
     return new Response(JSON.stringify({ 
-      error: 'API não configurada para este chip' 
+      error: 'API não encontrada' 
     }), {
-      status: 400,
+      status: 404,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  const testResult = await testAPIInternal(testApiKey, testPhoneId);
-  
-  return new Response(JSON.stringify({
-    success: testResult.success,
-    message: testResult.success ? 'API funcionando corretamente' : 'Erro na API',
-    error: testResult.error,
-    api_used: chip_id === 'primary' ? 'primary' : `chip_${chip_id}`
-  }), {
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
-}
-
-async function testAPIInternal(apiKey: string, phoneNumberId: string) {
+  // Testar a API
   try {
-    const response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}`, {
+    const response = await fetch(`https://graph.facebook.com/v19.0/${api.phone_number_id}`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${api.api_key}`,
       },
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      return {
-        success: false,
-        error: `API error: ${response.status} - ${errorText}`
-      };
-    }
-
     const data = await response.json();
-    return {
-      success: true,
-      data
-    };
+    
+    return new Response(JSON.stringify({
+      success: response.ok,
+      message: response.ok ? 'API funcionando corretamente' : 'Erro na API',
+      status: response.status,
+      data: data
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+
   } catch (error) {
-    return {
+    return new Response(JSON.stringify({
       success: false,
+      message: 'Erro ao testar API',
       error: error.message
-    };
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 }

@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 
 const corsHeaders = {
@@ -13,150 +14,178 @@ serve(async (req) => {
   }
 
   try {
-    // Obter todas as variáveis de ambiente
-    const WHATSAPP_API_KEY = Deno.env.get('WHATSAPP_API_KEY');
-    const WHATSAPP_PHONE_NUMBER_ID = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
+    // Criar cliente Supabase
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Obter user_id do header de autorização
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      return new Response(JSON.stringify({ 
+        error: 'Authorization header required' 
+      }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
     
+    if (userError || !user) {
+      return new Response(JSON.stringify({ 
+        error: 'Invalid token' 
+      }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     console.log('=== VERIFICAÇÃO DE CREDENCIAIS ===');
-    console.log('API Key existe:', !!WHATSAPP_API_KEY);
-    console.log('Phone Number ID existe:', !!WHATSAPP_PHONE_NUMBER_ID);
-    console.log('API Key primeiros chars:', WHATSAPP_API_KEY?.substring(0, 10) + '...');
-    console.log('Phone Number ID:', WHATSAPP_PHONE_NUMBER_ID);
-    console.log('Todas as variáveis de ambiente:', Object.keys(Deno.env.toObject()).filter(key => key.includes('WHATSAPP')));
+    console.log('User ID:', user.id);
 
-    const results = {
-      credentials_exist: {
-        api_key: !!WHATSAPP_API_KEY,
-        phone_number_id: !!WHATSAPP_PHONE_NUMBER_ID
-      },
-      api_key_preview: WHATSAPP_API_KEY ? WHATSAPP_API_KEY.substring(0, 10) + '...' : null,
-      phone_number_id: WHATSAPP_PHONE_NUMBER_ID,
-      all_whatsapp_env_vars: Object.keys(Deno.env.toObject()).filter(key => key.includes('WHATSAPP')),
-      tests: {}
-    };
+    // Buscar APIs do usuário
+    const { data: apis, error: apisError } = await supabase
+      .from('whatsapp_apis')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
 
-    // Se não temos credenciais, retornar erro mas com mais informações
-    if (!WHATSAPP_API_KEY || !WHATSAPP_PHONE_NUMBER_ID) {
-      console.error('❌ Credenciais não configuradas:');
-      console.error('- WHATSAPP_API_KEY:', !!WHATSAPP_API_KEY);
-      console.error('- WHATSAPP_PHONE_NUMBER_ID:', !!WHATSAPP_PHONE_NUMBER_ID);
-      
+    if (apisError) {
+      console.error('Erro ao buscar APIs:', apisError);
       return new Response(JSON.stringify({
         success: false,
-        error: 'Credenciais não configuradas',
-        results,
-        debug_info: {
-          api_key_exists: !!WHATSAPP_API_KEY,
-          phone_number_id_exists: !!WHATSAPP_PHONE_NUMBER_ID,
-          all_env_vars: Object.keys(Deno.env.toObject()).filter(key => key.includes('WHATSAPP'))
+        error: 'Erro ao buscar APIs',
+        results: {
+          apis_found: 0,
+          error: apisError.message
         }
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    console.log('✅ Credenciais encontradas, iniciando testes...');
+    console.log('APIs encontradas:', apis?.length || 0);
 
-    // Teste 1: Verificar informações do número
-    console.log('--- TESTE 1: Verificando informações do número ---');
-    try {
-      const phoneInfoResponse = await fetch(`https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_NUMBER_ID}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${WHATSAPP_API_KEY}`,
-        },
-      });
+    const results = {
+      user_id: user.id,
+      apis_found: apis?.length || 0,
+      apis: apis?.map(api => ({
+        id: api.id,
+        name: api.name,
+        phone_number_id: api.phone_number_id,
+        is_active: api.is_active,
+        created_at: api.created_at
+      })) || [],
+      tests: {}
+    };
 
-      const phoneInfoData = await phoneInfoResponse.json();
-      console.log('Phone info response status:', phoneInfoResponse.status);
-      console.log('Phone info data:', phoneInfoData);
-
-      results.tests.phone_info = {
-        success: phoneInfoResponse.ok,
-        status: phoneInfoResponse.status,
-        data: phoneInfoData
-      };
-    } catch (error) {
-      console.error('Erro no teste phone info:', error);
-      results.tests.phone_info = {
+    // Se não há APIs configuradas
+    if (!apis || apis.length === 0) {
+      console.log('❌ Nenhuma API configurada');
+      return new Response(JSON.stringify({
         success: false,
-        error: error.message
-      };
+        error: 'Nenhuma API do WhatsApp configurada',
+        results,
+        recommendations: [
+          'Adicione uma API do WhatsApp Business',
+          'Configure as credenciais no painel de administração',
+          'Use a função manage-whatsapp-apis para adicionar APIs'
+        ]
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
-    // Teste 2: Verificar se consegue acessar a API de mensagens
-    console.log('--- TESTE 2: Testando acesso à API de mensagens ---');
-    try {
-      const messagesTestResponse = await fetch(`https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${WHATSAPP_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: "5511999999999", // número fake para teste
-          type: "text",
-          text: {
-            body: "teste"
+    console.log('✅ APIs encontradas, iniciando testes...');
+
+    // Testar cada API
+    for (let i = 0; i < apis.length; i++) {
+      const api = apis[i];
+      console.log(`--- TESTE ${i + 1}: API "${api.name}" ---`);
+
+      // Teste 1: Verificar informações do número
+      try {
+        const phoneInfoResponse = await fetch(`https://graph.facebook.com/v19.0/${api.phone_number_id}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${api.api_key}`,
+          },
+        });
+
+        const phoneInfoData = await phoneInfoResponse.json();
+        console.log(`API ${api.name} - Phone info status:`, phoneInfoResponse.status);
+
+        results.tests[`api_${i + 1}`] = {
+          api_name: api.name,
+          api_id: api.id,
+          phone_info: {
+            success: phoneInfoResponse.ok,
+            status: phoneInfoResponse.status,
+            data: phoneInfoData
           }
-        }),
-      });
+        };
+      } catch (error) {
+        console.error(`Erro no teste da API ${api.name}:`, error);
+        results.tests[`api_${i + 1}`] = {
+          api_name: api.name,
+          api_id: api.id,
+          phone_info: {
+            success: false,
+            error: error.message
+          }
+        };
+      }
 
-      const messagesTestData = await messagesTestResponse.json();
-      console.log('Messages test response status:', messagesTestResponse.status);
-      console.log('Messages test data:', messagesTestData);
+      // Teste 2: Verificar se consegue acessar a API de mensagens
+      try {
+        const messagesTestResponse = await fetch(`https://graph.facebook.com/v19.0/${api.phone_number_id}/messages`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${api.api_key}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            to: "5511999999999", // número fake para teste
+            type: "text",
+            text: {
+              body: "teste"
+            }
+          }),
+        });
 
-      results.tests.messages_api = {
-        success: messagesTestResponse.status !== 401 && messagesTestResponse.status !== 403,
-        status: messagesTestResponse.status,
-        data: messagesTestData,
-        note: 'Status 400 é esperado (número inválido), 401/403 indica problema de credenciais'
-      };
-    } catch (error) {
-      console.error('Erro no teste messages API:', error);
-      results.tests.messages_api = {
-        success: false,
-        error: error.message
-      };
-    }
+        const messagesTestData = await messagesTestResponse.json();
+        console.log(`API ${api.name} - Messages test status:`, messagesTestResponse.status);
 
-    // Teste 3: Verificar limites e quota
-    console.log('--- TESTE 3: Verificando limites da conta ---');
-    try {
-      const quotaResponse = await fetch(`https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_NUMBER_ID}?fields=messaging_limit_tier,account_mode`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${WHATSAPP_API_KEY}`,
-        },
-      });
-
-      const quotaData = await quotaResponse.json();
-      console.log('Quota response status:', quotaResponse.status);
-      console.log('Quota data:', quotaData);
-
-      results.tests.quota_info = {
-        success: quotaResponse.ok,
-        status: quotaResponse.status,
-        data: quotaData
-      };
-    } catch (error) {
-      console.error('Erro no teste quota:', error);
-      results.tests.quota_info = {
-        success: false,
-        error: error.message
-      };
+        results.tests[`api_${i + 1}`].messages_api = {
+          success: messagesTestResponse.status !== 401 && messagesTestResponse.status !== 403,
+          status: messagesTestResponse.status,
+          data: messagesTestData,
+          note: 'Status 400 é esperado (número inválido), 401/403 indica problema de credenciais'
+        };
+      } catch (error) {
+        console.error(`Erro no teste de mensagens da API ${api.name}:`, error);
+        results.tests[`api_${i + 1}`].messages_api = {
+          success: false,
+          error: error.message
+        };
+      }
     }
 
     // Determinar se os testes foram bem-sucedidos
-    const allTestsPassed = Object.values(results.tests).every(test => test.success);
+    const allTestsPassed = Object.values(results.tests).every(test => 
+      test.phone_info?.success && test.messages_api?.success
+    );
     
     console.log('=== RESULTADO FINAL ===');
     console.log('Todos os testes passaram:', allTestsPassed);
 
     return new Response(JSON.stringify({
       success: allTestsPassed,
-      message: allTestsPassed ? 'Credenciais funcionando corretamente' : 'Alguns testes falharam',
+      message: allTestsPassed ? 'Todas as APIs estão funcionando corretamente' : 'Alguns testes falharam',
       results
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -168,10 +197,6 @@ serve(async (req) => {
       success: false,
       error: error.message,
       results: {
-        credentials_exist: {
-          api_key: !!Deno.env.get('WHATSAPP_API_KEY'),
-          phone_number_id: !!Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')
-        },
         error: error.message
       }
     }), {
