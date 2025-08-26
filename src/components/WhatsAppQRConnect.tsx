@@ -38,7 +38,7 @@ export function WhatsAppQRConnect({
 
   const checkCredentialsStatus = async () => {
     try {
-      const { data, error } = await supabase.functions.invoke('test-whatsapp');
+      const { data, error } = await supabase.functions.invoke('check-api');
       
       if (error) {
         console.error('Erro na verificação:', error);
