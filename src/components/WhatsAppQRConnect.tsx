@@ -38,7 +38,7 @@ export function WhatsAppQRConnect({
 
   const checkCredentialsStatus = async () => {
     try {
-      const response = await fetch('/api/verify-credentials', {
+      const response = await fetch('http://localhost:3001/api/verify-credentials', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
