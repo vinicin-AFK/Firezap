@@ -2,13 +2,5 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "installCommand": "npm install --legacy-peer-deps",
-  "functions": {
-    "api/verify-credentials.js": {
-      "runtime": "nodejs18.x"
-    },
-    "api/whatsapp-qr.js": {
-      "runtime": "nodejs18.x"
-    }
-  }
+  "installCommand": "npm install --legacy-peer-deps"
 }
