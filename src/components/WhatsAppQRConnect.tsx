@@ -38,10 +38,22 @@ export function WhatsAppQRConnect({
 
   const checkCredentialsStatus = async () => {
     try {
-      const { data, error } = await supabase.functions.invoke('check-api');
+      // Usar API route local em desenvolvimento, Vercel em produção
+      const apiUrl = window.location.hostname === 'localhost' 
+        ? 'http://localhost:3001/api/verify-credentials'
+        : 'https://firezap-nine.vercel.app/api/verify-credentials';
       
-      if (error) {
-        console.error('Erro na verificação:', error);
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        console.error('Erro na verificação:', data);
         setCredentialsStatus('error');
         return;
       }
