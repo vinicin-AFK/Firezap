@@ -38,15 +38,18 @@ export function WhatsAppQRConnect({
 
   const checkCredentialsStatus = async () => {
     try {
-      const { data, error } = await supabase.functions.invoke('simple-verify');
+      const { data, error } = await supabase.functions.invoke('test-whatsapp');
       
       if (error) {
+        console.error('Erro na verificação:', error);
         setCredentialsStatus('error');
         return;
       }
 
+      console.log('Resposta da verificação:', data);
       setCredentialsStatus(data.success ? 'configured' : 'not-configured');
     } catch (error) {
+      console.error('Erro geral:', error);
       setCredentialsStatus('error');
     }
   };
